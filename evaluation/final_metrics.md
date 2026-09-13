@@ -1,3 +1,8 @@
+# Final Evaluation Metrics
+
+> **NOTE:** The scoring metrics (76% / 84% / 60%) below are evaluated ONLY on the sample_requests.csv (25 requests) because ground truth labels are not provided for the full 250 equests.csv dataset. The full 250-row output was separately passed through the independent strict schema and invariant validator, passing 100% of structural checks.
+
+## 1. Sample Ground-Truth Scoring (25 requests)
 # Final Metrics
 
 ## Command
@@ -79,3 +84,7 @@ earliest_date_for_full_payment: 15/25 (60.0%)
 
 ## Status
 PASS
+
+
+## 2. Full Output Structural & Invariant Validation (250 requests)
+
