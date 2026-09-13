@@ -63,6 +63,100 @@ class PaymentOptimizer:
                     stoppable_events.append(ev)
                 if is_reduce and not is_stop:
                     reducible_events.append(ev)
+                    
+        import itertools
+        def apply_spending_changes(c: CandidatePlan, schedule: List[Tuple[date, Decimal]], end_date_sim: date):
+            if c.is_safe: return
+            
+            if not stoppable_events and not reducible_events:
+                return
+                
+            shortfall = profile.minimum_balance_to_keep - c.lowest_balance
+            
+            options = []
+            # 1) Try single changes
+            for sev in stoppable_events:
+                options.append([f"stop:{sev['event_id']}"])
+                
+            for rev in reducible_events:
+                rev_amount = abs(float(rev["amount"]))
+                reduction_needed = min(float(shortfall), rev_amount)
+                if reduction_needed > 0:
+                    new_amount = rev_amount - reduction_needed
+                    options.append([f"reduce_to:{rev['event_id']}:{new_amount:.2f}"])
+                    
+            # 2) Try max savings combo
+            max_combo = []
+            current_savings = 0.0
+            for ev in stoppable_events:
+                max_combo.append(f"stop:{ev['event_id']}")
+                current_savings += abs(float(ev["amount"]))
+            
+            remaining = max(0.0, float(shortfall) - current_savings)
+            for ev in reducible_events:
+                if remaining > 0:
+                    rev_amount = abs(float(ev["amount"]))
+                    reduction_needed = min(remaining, rev_amount)
+                    new_amount = rev_amount - reduction_needed
+                    max_combo.append(f"reduce_to:{ev['event_id']}:{new_amount:.2f}")
+                    remaining -= reduction_needed
+            options.append(max_combo)
+                    
+            # 3) Try combinations of 2 if singles and max fail
+            for i in range(2, min(4, len(stoppable_events) + len(reducible_events) + 1)):
+                for combo in itertools.combinations(stoppable_events + reducible_events, i):
+                    combo_changes = []
+                    current_savings = 0.0
+                    
+                    # For a combo, we first apply all stops
+                    for ev in combo:
+                        if ev in stoppable_events:
+                            combo_changes.append(f"stop:{ev['event_id']}")
+                            current_savings += abs(float(ev["amount"]))
+                            
+                    # Then we apply reductions to cover the remaining shortfall
+                    remaining_shortfall = max(0.0, float(shortfall) - current_savings)
+                    for ev in combo:
+                        if ev in reducible_events and remaining_shortfall > 0:
+                            rev_amount = abs(float(ev["amount"]))
+                            reduction_needed = min(remaining_shortfall, rev_amount)
+                            new_amount = rev_amount - reduction_needed
+                            combo_changes.append(f"reduce_to:{ev['event_id']}:{new_amount:.2f}")
+                            remaining_shortfall -= reduction_needed
+                            
+                    options.append(combo_changes)
+                    
+            for changes in options:
+                is_safe_mod, lowest_mod, _, _ = self.simulator.simulate(
+                    profile.current_available_balance, profile.minimum_balance_to_keep,
+                    request.request_date, end_date_sim, events, schedule,
+                    spending_changes=changes
+                )
+                if is_safe_mod:
+                    c.is_safe = True
+                    c.lowest_balance = lowest_mod
+                    
+                    # Format changes for output
+                    formatted_changes = []
+                    for chg in changes:
+                        parts = chg.split(":")
+                        if parts[0] == "stop":
+                            formatted_changes.append(chg)
+                        elif parts[0] == "reduce_to":
+                            eid = parts[1]
+                            new_amt = float(parts[2])
+                            # find original amount
+                            orig_amt = 0
+                            for rev in reducible_events:
+                                if rev["event_id"] == eid:
+                                    orig_amt = abs(float(rev["amount"]))
+                                    break
+                            reduction = orig_amt - new_amt
+                            formatted_changes.append(f"reduce:{eid}:by:{reduction:.2f}")
+                            
+                    c.spending_changes = " AND ".join(formatted_changes)
+                    return
+                        
         
         # 1. Full Payment
         if "full_payment" in allowed_methods:
@@ -78,53 +172,8 @@ class PaymentOptimizer:
             c.is_safe = is_safe
             c.lowest_balance = lowest
             
-            if not c.is_safe and (stoppable_events or reducible_events):
-                # Calculate the exact shortfall to determine how much to reduce
-                shortfall = profile.minimum_balance_to_keep - c.lowest_balance
-                
-                # Attempt to stop an event to make it safe
-                for sev in stoppable_events:
-                    # Rerun simulation with spending change
-                    is_safe_mod, lowest_mod, _, _ = self.simulator.simulate(
-                        profile.current_available_balance, profile.minimum_balance_to_keep,
-                        request.request_date, end_date, events, 
-                        [(request.request_date, request.requested_amount)],
-                        spending_changes=[f"stop:{sev['event_id']}"]
-                    )
-                    if is_safe_mod:
-                        c.is_safe = True
-                        c.lowest_balance = lowest_mod
-                        c.spending_changes = f"stop:{sev['event_id']}"
-                        break
-                        
-                # If still not safe, try reducing events
-                if not c.is_safe:
-                    for rev in reducible_events:
-                        rev_amount = abs(float(rev["amount"]))
-                        # Reduce by exactly the shortfall, but cap at the total event amount
-                        reduction_needed = min(float(shortfall), rev_amount)
-                        # Actually wait, if the shortfall is because of a single occurrence, 
-                        # reducing the event by `shortfall` means the new amount is `rev_amount - shortfall`.
-                        if reduction_needed > 0:
-                            new_amount = rev_amount - reduction_needed
-                            is_safe_mod, lowest_mod, _, _ = self.simulator.simulate(
-                                profile.current_available_balance, profile.minimum_balance_to_keep,
-                                request.request_date, end_date, events, 
-                                [(request.request_date, request.requested_amount)],
-                                spending_changes=[f"reduce_to:{rev['event_id']}:{new_amount:.2f}"]
-                            )
-                            if is_safe_mod:
-                                c.is_safe = True
-                                c.lowest_balance = lowest_mod
-                                # Format as specified: reduce:event_id:by:amount
-                                c.spending_changes = f"reduce:{rev['event_id']}:by:{reduction_needed:.2f}"
-                                if request.user_id == "user_06":
-                                    print(f"[DEBUG] user_06 found safe plan by reducing {rev['event_id']} by {reduction_needed:.2f}")
-                                break
-                            else:
-                                if request.user_id == "user_06":
-                                    print(f"[DEBUG] user_06 still unsafe after reducing {rev['event_id']} by {reduction_needed:.2f} (lowest_mod={lowest_mod})")
-                        
+            apply_spending_changes(c, [(request.request_date, request.requested_amount)], end_date)
+            
             candidates.append(c)
 
         # 2. Wait
@@ -140,6 +189,7 @@ class PaymentOptimizer:
                 )
                 c.is_safe = is_safe
                 c.lowest_balance = lowest
+                apply_spending_changes(c, [(earliest_safe_date, request.requested_amount)], end_date)
                 candidates.append(c)
                 
         # 3. Installments
@@ -173,6 +223,7 @@ class PaymentOptimizer:
                 )
                 c.is_safe = is_safe
                 c.lowest_balance = lowest
+                apply_spending_changes(c, schedule, end_date)
                 candidates.append(c)
                 
         # 4. Partial Payment
@@ -197,6 +248,7 @@ class PaymentOptimizer:
                     )
                     c.is_safe = is_safe
                     c.lowest_balance = lowest
+                    apply_spending_changes(c, schedule, end_date)
                     candidates.append(c)
                 
         return [c for c in candidates if c.is_safe]

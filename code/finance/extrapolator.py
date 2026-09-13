@@ -52,13 +52,10 @@ def extrapolate_events(events: List[dict], request_date: date) -> List[dict]:
             "is_extrapolated": False
         }
         
-        # If it's explicitly scheduled/pending in the future, just add it!
         if status in ["scheduled", "pending"] and ev_date >= request_date:
             timeline.append(event_dict)
-            # Don't use future explicit events for historical extrapolation gaps
-            continue
             
-        if status == "settled" or ev_date < request_date:
+        if status == "settled" or ev_date < request_date or status in ["scheduled", "pending"]:
             grouped[desc].append(event_dict)
             
     # Extrapolate
@@ -68,12 +65,15 @@ def extrapolate_events(events: List[dict], request_date: date) -> List[dict]:
         history.sort(key=lambda x: x["date"])
         latest_event = history[-1]
         
-        # Calculate gap
-        if len(history) > 1:
+        if len(history) <= 1 and not latest_event["event_id"].startswith("ai_msg_") and latest_event["date"] < request_date:
+            if latest_event["amount"] > 0:
+                continue
+            
+        if len(history) <= 1:
+            avg_gap = 30
+        else:
             total_days = (latest_event["date"] - history[0]["date"]).days
             avg_gap = max(1, total_days // (len(history) - 1))
-        else:
-            avg_gap = 30 # Default to monthly
             
         days_since_last = (request_date - latest_event["date"]).days
         # If the gap since the last occurrence is significantly larger than the average gap,
@@ -82,12 +82,27 @@ def extrapolate_events(events: List[dict], request_date: date) -> List[dict]:
         if days_since_last > max(14, 1.5 * avg_gap):
             continue
             
+        # Extrapolate until end_date
+        if 28 <= avg_gap <= 31:
+            days_of_month = set(x["date"].day for x in history)
+            if len(days_of_month) == 1:
+                from dateutil.relativedelta import relativedelta
+                proj_date = latest_event["date"] + relativedelta(months=1)
+                while proj_date <= end_date:
+                    proj_event = latest_event.copy()
+                    proj_event["date"] = proj_date
+                    proj_event["is_extrapolated"] = True
+                    timeline.append(proj_event)
+                    proj_date += relativedelta(months=1)
+                continue
+                
         proj_date = latest_event["date"] + timedelta(days=avg_gap)
         
         while proj_date <= end_date:
-            proj_event = dict(latest_event)
+            proj_event = latest_event.copy()
             proj_event["date"] = proj_date
             proj_event["is_extrapolated"] = True
+            if desc == "Takeaway order": print(f"DEBUG: Extrapolating {desc} to {proj_date}")
             timeline.append(proj_event)
             proj_date += timedelta(days=avg_gap)
             
