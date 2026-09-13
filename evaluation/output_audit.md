@@ -2,18 +2,18 @@
 
 ## Distributions
 ### Affordability Status
-- **affordable_now**: 46 (18.4%)
-- **affordable_later**: 23 (9.2%)
-- **affordable_with_plan**: 40 (16.0%)
-- **not_affordable**: 141 (56.4%)
+- **affordable_now**: 63 (25.2%)
+- **affordable_later**: 38 (15.2%)
+- **not_affordable**: 88 (35.2%)
+- **affordable_with_plan**: 61 (24.4%)
 
 ### Payment Method
-- **full_payment**: 46 (18.4%)
-- **wait**: 23 (9.2%)
-- **installments**: 36 (14.4%)
-- **not_recommended**: 141 (56.4%)
-- **partial_payment**: 4 (1.6%)
+- **full_payment**: 66 (26.4%)
+- **wait**: 38 (15.2%)
+- **not_recommended**: 88 (35.2%)
+- **installments**: 51 (20.4%)
+- **partial_payment**: 7 (2.8%)
 
 ## Mathematical Consistency
 - **Total Contradictions**: 0
-- **Average Safe Amount Ratio**: 19.3% of requested amount
+- **Average Safe Amount Ratio**: 47.7% of requested amount
