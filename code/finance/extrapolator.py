@@ -58,16 +58,30 @@ def extrapolate_events(events: List[dict], request_date: date) -> List[dict]:
         if status == "settled" or ev_date < request_date or status in ["scheduled", "pending"]:
             grouped[desc].append(event_dict)
             
-    # Extrapolate
+    # Build set of (date, amount) pairs already covered by scheduled/pending credits
+    # to avoid double-counting salary when Next confirmed salary is scheduled
+    # Also find the EARLIEST scheduled credit date — we stop extrapolating recurring credits beyond it
     end_date = request_date + timedelta(days=90)
-    
+    scheduled_credit_dates = set()
+    earliest_scheduled_credit = None
+    for e in timeline:
+        if e["amount"] > 0 and not e["is_extrapolated"]:
+            scheduled_credit_dates.add(e["date"])
+            if earliest_scheduled_credit is None or e["date"] < earliest_scheduled_credit:
+                earliest_scheduled_credit = e["date"]
+            
     for desc, history in grouped.items():
         history.sort(key=lambda x: x["date"])
         latest_event = history[-1]
         
         if len(history) <= 1 and not latest_event["event_id"].startswith("ai_msg_") and latest_event["date"] < request_date:
-            if latest_event["amount"] > 0:
-                continue
+            # Skip all single-occurrence past events — no frequency pattern to extrapolate reliably
+            continue
+            
+        if len(history) <= 1 and not latest_event["event_id"].startswith("ai_msg_") and latest_event["date"] >= request_date:
+            # Single-occurrence future scheduled/pending events (e.g. 'Next confirmed salary')
+            # are one-time confirmations — do NOT extrapolate them further
+            continue
             
         if len(history) <= 1:
             avg_gap = 30
@@ -82,13 +96,17 @@ def extrapolate_events(events: List[dict], request_date: date) -> List[dict]:
         if days_since_last > max(14, 1.5 * avg_gap):
             continue
             
-        # Extrapolate until end_date
         if 28 <= avg_gap <= 31:
             days_of_month = set(x["date"].day for x in history)
             if len(days_of_month) == 1:
                 from dateutil.relativedelta import relativedelta
                 proj_date = latest_event["date"] + relativedelta(months=1)
+                # pyrefly: ignore [unknown-name]
                 while proj_date <= end_date:
+                    # Skip if a scheduled credit already covers this specific date
+                    if latest_event["amount"] > 0 and proj_date in scheduled_credit_dates:
+                        proj_date += relativedelta(months=1)
+                        continue
                     proj_event = latest_event.copy()
                     proj_event["date"] = proj_date
                     proj_event["is_extrapolated"] = True
@@ -98,11 +116,15 @@ def extrapolate_events(events: List[dict], request_date: date) -> List[dict]:
                 
         proj_date = latest_event["date"] + timedelta(days=avg_gap)
         
+        # pyrefly: ignore [unknown-name]
         while proj_date <= end_date:
+            # Skip if a scheduled credit already covers this specific date (avoid double-counting)
+            if latest_event["amount"] > 0 and proj_date in scheduled_credit_dates:
+                proj_date += timedelta(days=avg_gap)
+                continue
             proj_event = latest_event.copy()
             proj_event["date"] = proj_date
             proj_event["is_extrapolated"] = True
-            if desc == "Takeaway order": print(f"DEBUG: Extrapolating {desc} to {proj_date}")
             timeline.append(proj_event)
             proj_date += timedelta(days=avg_gap)
             
