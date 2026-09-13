@@ -58,7 +58,6 @@ def extrapolate_events(events: List[dict], request_date: date) -> List[dict]:
             # Don't use future explicit events for historical extrapolation gaps
             continue
             
-        # Add to history for extrapolation
         if status == "settled" or ev_date < request_date:
             grouped[desc].append(event_dict)
             
@@ -76,14 +75,20 @@ def extrapolate_events(events: List[dict], request_date: date) -> List[dict]:
         else:
             avg_gap = 30 # Default to monthly
             
+        days_since_last = (request_date - latest_event["date"]).days
+        # If the gap since the last occurrence is significantly larger than the average gap,
+        # it is considered inactive/cancelled and should not be projected.
+        # We use a 1.5x multiplier threshold, but minimum 14 days grace period for short gaps.
+        if days_since_last > max(14, 1.5 * avg_gap):
+            continue
+            
         proj_date = latest_event["date"] + timedelta(days=avg_gap)
         
         while proj_date <= end_date:
-            if proj_date >= request_date:
-                proj_event = dict(latest_event)
-                proj_event["date"] = proj_date
-                proj_event["is_extrapolated"] = True
-                timeline.append(proj_event)
+            proj_event = dict(latest_event)
+            proj_event["date"] = proj_date
+            proj_event["is_extrapolated"] = True
+            timeline.append(proj_event)
             proj_date += timedelta(days=avg_gap)
             
     return timeline

@@ -75,11 +75,6 @@ class CashFlowSimulator:
         timeline.sort(key=lambda x: (x[0], get_priority(x[1], x[2])))
         
         for event_date, amount, description in timeline:
-            if event_date < start_date:
-                # In a real scenario, past events shouldn't be in the future timeline,
-                # but if they are, they are already accounted for in current_balance
-                continue
-                
             if event_date > end_date:
                 break
                 
