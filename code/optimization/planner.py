@@ -43,6 +43,7 @@ class PaymentOptimizer:
         candidates = []
         end_date = request.request_date + timedelta(days=90)
         allowed_methods = profile.payment_methods_user_will_consider
+        print(f"DEBUG planner: request_id={request.request_id}, allowed_methods={allowed_methods}")
         
         willing_to_stop = willing_to_stop or set()
         willing_to_reduce = willing_to_reduce or set()
@@ -73,13 +74,27 @@ class PaymentOptimizer:
                 
             shortfall = profile.minimum_balance_to_keep - c.lowest_balance
             
+            def get_amount(item: dict) -> float:
+                amt_str = item.get("amount", "0")
+                if not amt_str:
+                    amt_str = "0"
+                return abs(float(amt_str))
+            
             options = []
             # 1) Try single changes
             for sev in stoppable_events:
                 options.append([f"stop:{sev['event_id']}"])
                 
             for rev in reducible_events:
-                rev_amount = abs(float(rev["amount"]))
+                if rev.get("minimum_allowed_amount"):
+                    min_allowed = abs(float(rev["minimum_allowed_amount"]))
+                else:
+                    min_allowed = 0.0
+                
+                amt_str = rev.get("amount", "0")
+                if not amt_str:
+                    amt_str = "0"
+                rev_amount = abs(float(amt_str))
                 reduction_needed = min(float(shortfall), rev_amount)
                 if reduction_needed > 0:
                     new_amount = rev_amount - reduction_needed
@@ -90,12 +105,12 @@ class PaymentOptimizer:
             current_savings = 0.0
             for ev in stoppable_events:
                 max_combo.append(f"stop:{ev['event_id']}")
-                current_savings += abs(float(ev["amount"]))
-            
+                current_savings += get_amount(ev)
+                
             remaining = max(0.0, float(shortfall) - current_savings)
-            for ev in reducible_events:
-                if remaining > 0:
-                    rev_amount = abs(float(ev["amount"]))
+            if remaining > 0:
+                for ev in reducible_events:
+                    rev_amount = get_amount(ev)
                     reduction_needed = min(remaining, rev_amount)
                     new_amount = rev_amount - reduction_needed
                     max_combo.append(f"reduce_to:{ev['event_id']}:{new_amount:.2f}")
@@ -112,13 +127,13 @@ class PaymentOptimizer:
                     for ev in combo:
                         if ev in stoppable_events:
                             combo_changes.append(f"stop:{ev['event_id']}")
-                            current_savings += abs(float(ev["amount"]))
+                            current_savings += get_amount(ev)
                             
                     # Then we apply reductions to cover the remaining shortfall
                     remaining_shortfall = max(0.0, float(shortfall) - current_savings)
                     for ev in combo:
                         if ev in reducible_events and remaining_shortfall > 0:
-                            rev_amount = abs(float(ev["amount"]))
+                            rev_amount = get_amount(ev)
                             reduction_needed = min(remaining_shortfall, rev_amount)
                             new_amount = rev_amount - reduction_needed
                             combo_changes.append(f"reduce_to:{ev['event_id']}:{new_amount:.2f}")
@@ -149,7 +164,7 @@ class PaymentOptimizer:
                             orig_amt = 0
                             for rev in reducible_events:
                                 if rev["event_id"] == eid:
-                                    orig_amt = abs(float(rev["amount"]))
+                                    orig_amt = get_amount(rev)
                                     break
                             reduction = orig_amt - new_amt
                             formatted_changes.append(f"reduce:{eid}:by:{reduction:.2f}")

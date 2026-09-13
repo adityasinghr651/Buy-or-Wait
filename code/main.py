@@ -91,6 +91,7 @@ def run_pipeline():
                         "minimum_allowed_amount": "",
                         "is_extrapolated": False
                     })
+                    print(f"DEBUG fact added: {extracted_facts[-1]}")
         
         # Inject AI facts into the raw events pool
         user_raw_events.extend(extracted_facts)
@@ -108,6 +109,16 @@ def run_pipeline():
             req, profile, options, events, earliest_safe,
             user_raw_events, willing_to_stop, willing_to_reduce
         )
+        if req.request_id == 'request_11':
+            print(f"DEBUG {req.request_id}: willing_to_stop={willing_to_stop}, willing_to_reduce={willing_to_reduce}")
+            total = profile.current_available_balance - req.requested_amount
+            print(f"INIT BALANCE AFTER PAY: {total}")
+            for e in sorted(events, key=lambda x: x["date"]):
+                if (e['date'] - req.request_date).days <= 30:
+                    print(f"  {e['date']} {e['description']} {e['amount']}")
+            if candidates:
+                for c in candidates:
+                    print(f"  Cand: {c.method} {c.spending_changes} is_safe={c.is_safe} lowest={c.lowest_balance}")
         best_plan = planner.rank_plans(candidates)
         
         # Always calculate the absolute safe amount today

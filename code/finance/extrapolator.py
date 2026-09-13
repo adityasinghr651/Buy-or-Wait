@@ -72,9 +72,28 @@ def extrapolate_events(events: List[dict], request_date: date) -> List[dict]:
             
     for desc, history in grouped.items():
         history.sort(key=lambda x: x["date"])
+        
+        # Filter history by dropping events that occurred before a gap > 1.5 * avg_gap
+        valid_history = [history[0]]
+        for i in range(1, len(history)):
+            prev = valid_history[-1]
+            curr = history[i]
+            gap = (curr["date"] - prev["date"]).days
+            
+            if len(valid_history) <= 1:
+                current_avg_gap = 30
+            else:
+                current_avg_gap = max(1, (prev["date"] - valid_history[0]["date"]).days // (len(valid_history) - 1))
+                
+            if gap > max(14, 1.5 * current_avg_gap):
+                valid_history = [curr]
+            else:
+                valid_history.append(curr)
+                
+        history = valid_history
         latest_event = history[-1]
         
-        if len(history) <= 1 and not latest_event["event_id"].startswith("ai_msg_") and latest_event["date"] < request_date:
+        if len(history) <= 1 and not history[-1]["event_id"].startswith("ai_msg_") and history[-1]["date"] < request_date:
             # Skip all single-occurrence past events — no frequency pattern to extrapolate reliably
             continue
             
